@@ -20,20 +20,28 @@ void EXTI_Config(void);
 void NVIC_Config(void);
 void SystemClock_Config(void);
 
-void start_calibration();
-void stop_traction();
-void stop_break();
+void start_calibration(void);
+void stop_traction(void);
+void stop_break(void);
+void traction_up(void)
+void traction_down(void);
+void break_up(void)
+void break_down(void);
 
 /*******************************************************************/
 
 typedef enum
 {
     S_INIT,
+    S_CAL,
+    S_OPERATION,
 } E_STATE;
 
 E_STATE state = S_INIT;
 
-uint32_t pos_traction = 0, pos_break = 0, target_traction = 0, target_break = 0;
+int32_t pos_traction = 0, pos_break = 0, target_traction = 0, target_break = 0;
+int32_t end_traction = 0, end_break = 0;
+uint8_t dir_break = 'n', dir_traction = 'n';    // up, down, neutral
 
 
 /*******************************************************************/
@@ -64,7 +72,7 @@ Punched disk A: PB6, B: PC7
 Potentiometer: PA7
 USART3 RX: PB8, TX: PB9
 
-TIM6 is configured with 20 Hz timer interrupt
+TIM6 is configured with 10 Hz timer interrupt
 
 /*******************************************************************
 Statemachine:
@@ -83,10 +91,8 @@ stopper B top: tx 93 => 2a nein 2b ja
 
 calibration:
 - if not yet stopper top: move up till rx 0d (A) or 2d (B) => stop
-- wait 2 ticks
 - set counter to 0 count up
 - move down till rx 0c (A) or 2c (B) => stop
-- wait 2 ticks
 - read counter
 - calculate step width
 - set counter to 0 count up
@@ -150,13 +156,35 @@ void USART3_IRQHandler()
         break;
 
         case 0x0c: // stopper A bottom reached
+        stop_traction();
+        if (state == S_CAL) {
+            // position might be negative if the lin drive was not at the bottom
+            end_traction = end_traction - pos_traction;
+            state = S_OPERATION;
+        }
+        break;
         case 0x0d: // stopper A top reached
         stop_traction();
+        if (state == S_CAL) {
+            // position might be negative if the lin drive was not at the bottom
+            end_traction = pos_traction;
+            traction_down();
+        }
         break;
 
         case 0x2c: // stopper B bottom reached
+        stop_break();
+        if (state == S_CAL) {
+            end_break = end_break - pos_break;
+            state = S_OPERATION;
+        }
+        break;
         case 0x2d: // stopper B top reached
         stop_break();
+        if (state == S_CAL) {
+            end_break = pos_break;
+            break_down();
+        }
         break;
 
         default:    // everything else should not come => safety reaction
@@ -171,8 +199,9 @@ void USART3_IRQHandler()
 // start the linear drive for A and B
 void start_calibration()
 {
-    LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_5);
-    LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_8);
+    state = S_CAL;
+    traction_up();
+    break_up();
 }
 
 // stop linear drive for A
@@ -189,21 +218,45 @@ void stop_break()
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_6);
 }
 
+// linear drive for A to go DOWN 
+void traction_down()
+{
+    dir_traction = 'd';
+    LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_9);
+}
+
+// linear drive for A to go UP 
+void traction_up()
+{
+    dir_traction = 'u';
+    LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_5);
+}
+
+// linear drive for B to go UP 
+void break_up()
+{
+    dir_break = 'u';
+    LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_8);
+}
+
 /*******************************************************************/
 // interrupt from punched disk
 // NB after stopping, some more interrupts are anticipated
+// (except for end position, where the motor is stopped by hardware)
 
 void EXTI9_5_IRQHandler()
 {
     if(LL_EXTI_IsActiveFlag_0_31 (LL_EXTI_LINE_6))   // PB6 = Lochscheibe A
     {
-        pos_traction++;
+        if (dir_traction == 'u') pos_traction++;
+        else if (dir_traction == 'd') pos_traction--;
         if (pos_traction == target_traction) stop_traction();
         LL_EXTI_ClearFlag_0_31 (LL_EXTI_LINE_6);
     }
     if(LL_EXTI_IsActiveFlag_0_31 (LL_EXTI_LINE_7))   // PC7 = Lochscheibe B
     {
-        pos_break++;
+        if (dir_break == 'u') pos_break++;
+        else if (dir_break == 'd') pos_break--;
         if (pos_break == target_break) stop_break();
         LL_EXTI_ClearFlag_0_31 (LL_EXTI_LINE_7);
     }
