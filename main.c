@@ -166,7 +166,6 @@ void USART3_IRQHandler()
         case 0x0d: // stopper A top reached
         stop_traction();
         if (state == S_CAL) {
-            // position might be negative if the lin drive was not at the bottom
             end_traction = pos_traction;
             traction_down();
         }
@@ -175,6 +174,7 @@ void USART3_IRQHandler()
         case 0x2c: // stopper B bottom reached
         stop_break();
         if (state == S_CAL) {
+            // position might be negative if the lin drive was not at the bottom
             end_break = end_break - pos_break;
             state = S_OPERATION;
         }
