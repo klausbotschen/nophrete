@@ -1,4 +1,4 @@
-// Nofrete
+// Nofretete - building a pyramid
 
 // + Stm32f3xx_ll_bus
 // + stm32f3xx_ll_rcc
@@ -108,7 +108,8 @@ void sendCmd (uint8_t cmd)
 }
 
 /*******************************************************************/
-// called every 50 ms = 20 Hz
+// called every 100 ms = 10 Hz
+// read out potentionmeter, smoothen, and derive directive
 
 void TIM6_DAC_IRQHandler()
 {
@@ -120,6 +121,7 @@ void TIM6_DAC_IRQHandler()
 }
 
 /*******************************************************************/
+// received a byte from NOFRETETE
 
 void USART3_IRQHandler()
 {
@@ -129,31 +131,58 @@ void USART3_IRQHandler()
     recvd = LL_USART_ReceiveData8(USART3);
     switch (recvd)
     {
-        case 0x0c: // stopper A bottom
-        case 0x0d: // stopper A top
+        case 0x04: // barrel action finished
+        case 0x05: // barrel action ongoing
+        break;
+
+        case 0x24: // break action finished
+        case 0x25: // break action ongoing
+        break;
+
+        case 0x08: // status stopper A bottom not reached
+        case 0x09: // status stopper A bottom active
+        case 0x0a: // status stopper A top not reached
+        case 0x0b: // status stopper A top active
+        case 0x28: // status stopper B bottom not reached
+        case 0x29: // status stopper B bottom active
+        case 0x2a: // status stopper B top not reached
+        case 0x2b: // status stopper B top active
+        break;
+
+        case 0x0c: // stopper A bottom reached
+        case 0x0d: // stopper A top reached
         stop_traction();
         break;
 
-        case 0x2c: // stopper B bottom
-        case 0x2d: // stopper B top
+        case 0x2c: // stopper B bottom reached
+        case 0x2d: // stopper B top reached
         stop_break();
+        break;
+
+        default:    // everything else should not come => safety reaction
+        stop_traction();
+        stop_break();
+        // reset nofretete and restart statemachine
     }
 }
 
 /*******************************************************************/
 
+// start the linear drive for A and B
 void start_calibration()
 {
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_5);
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_8);
 }
 
+// stop linear drive for A
 void stop_traction()
 {
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_5);
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_9);
 }
 
+// stop linear drive for B
 void stop_break()
 {
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_8);
@@ -161,6 +190,8 @@ void stop_break()
 }
 
 /*******************************************************************/
+// interrupt from punched disk
+// NB after stopping, some more interrupts are anticipated
 
 void EXTI9_5_IRQHandler()
 {

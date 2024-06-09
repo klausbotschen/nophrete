@@ -1,4 +1,4 @@
-// Nofrete
+// Nofretete - building a pyramid
 // configuration of STM32 internal peripherals
 // RCC, GPIO, USART3, ADC2, NVIC
 
