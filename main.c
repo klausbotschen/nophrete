@@ -222,21 +222,28 @@ void stop_break()
 void traction_down()
 {
     dir_traction = 'd';
-    LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_9);
+    LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_9);
 }
 
 // linear drive for A to go UP 
 void traction_up()
 {
     dir_traction = 'u';
-    LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_5);
+    LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_5);
+}
+
+// linear drive for B to go DOWN
+void break_down()
+{
+    dir_break = 'd';
+    LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_6);
 }
 
 // linear drive for B to go UP 
 void break_up()
 {
     dir_break = 'u';
-    LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_8);
+    LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_8);
 }
 
 /*******************************************************************/
