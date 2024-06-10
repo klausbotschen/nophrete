@@ -4,6 +4,16 @@
 
 /*******************************************************************/
 
+#include "stm32f3xx_ll_bus.h"
+#include "stm32f3xx_ll_rcc.h"
+#include "stm32f3xx_ll_system.h"
+#include "stm32f3xx_ll_utils.h"
+#include "stm32f3xx_ll_exti.h"
+#include "stm32f3xx_ll_gpio.h"
+#include "stm32f3xx_ll_adc.h"
+#include "stm32f3xx_ll_tim.h"
+#include "stm32f3xx_ll_usart.h"
+
 void GPIO_Config(void)
 {
     // enable GPIO A, B and C in RCC
