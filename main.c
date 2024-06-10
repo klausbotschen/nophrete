@@ -23,9 +23,9 @@ void SystemClock_Config(void);
 void start_calibration(void);
 void stop_traction(void);
 void stop_break(void);
-void traction_up(void)
+void traction_up(void);
 void traction_down(void);
-void break_up(void)
+void break_up(void);
 void break_down(void);
 
 /*******************************************************************/
@@ -74,7 +74,7 @@ USART3 RX: PB8, TX: PB9
 
 TIM6 is configured with 10 Hz timer interrupt
 
-/*******************************************************************
+ *******************************************************************
 Statemachine:
 
 startup -> reset -> status -> calibration -> workmode
