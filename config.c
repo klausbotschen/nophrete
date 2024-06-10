@@ -87,7 +87,8 @@ void EXTI_Config(void)
 }
 
 /*******************************************************************/
-// TODO: more reasonable interrupt priorities
+// grouping 5 => gg.ss
+// all three interrupts can change states
 
 void NVIC_Config(void)
 {
@@ -95,13 +96,13 @@ void NVIC_Config(void)
     NVIC_SetPriorityGrouping(priority_grouping);
     uint32_t encoded_priority = NVIC_EncodePriority(priority_grouping,0,0);
 
-    NVIC_SetPriority(TIM6_DAC_IRQn, encoded_priority);	// lowest
+    NVIC_SetPriority(TIM6_DAC_IRQn, encoded_priority);
     NVIC_EnableIRQ(TIM6_DAC_IRQn);
 
-       NVIC_SetPriority(USART3_IRQn, encoded_priority);
+    NVIC_SetPriority(USART3_IRQn, encoded_priority);
     NVIC_EnableIRQ(USART3_IRQn);
 
-    NVIC_SetPriority(EXTI9_5_IRQn, encoded_priority);	// highest priority
+    NVIC_SetPriority(EXTI9_5_IRQn, encoded_priority);
     NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
 
