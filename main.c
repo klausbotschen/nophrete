@@ -1,15 +1,42 @@
-// Nofretete - building a pyramid
+/*
+  ******************************************************************************
+  HIER BITTE NAMEN + MATRIKELNUMMER EINTRAGEN
+  
+  In diesem Projekt gilt:
+  *=============================================================================
+  *        SYSCLK(Hz)                             | 64000000
+  *-----------------------------------------------------------------------------
+  *        AHB Prescaler                          | 1
+  *-----------------------------------------------------------------------------
+  *        APB2 Prescaler                         | 1
+  *-----------------------------------------------------------------------------
+  *        APB1 Prescaler                         | 2
+  *=============================================================================
+  ******************************************************************************
+*/
 
-// + Stm32f3xx_ll_bus
-// + stm32f3xx_ll_rcc
-// + stm32f3xx_ll_system.h
-// + stm32f3xx_ll_exti.h
-// + stm32f3xx_ll_adc
-// + stm32f3xx_ll_gpio
-// + stm32f3xx_ll_tim
-// + stm32f3xx_ll_usart
-
+/* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "functions.h"
+
+/** @addtogroup STM32F3xx_LL_Examples
+  * @{
+  */
+
+/** @addtogroup Templates_LL
+  * @{
+  */
+
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
+/* Private variables ---------------------------------------------------------*/
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+
+
+/* Private functions ---------------------------------------------------------*/
+
 
 void GPIO_Config(void);
 void USART3_Config(void);
@@ -18,31 +45,60 @@ void ADC_Config(void);
 void ADC_Start(void);
 void EXTI_Config(void);
 void NVIC_Config(void);
-void SystemClock_Config(void);
 
-void start_calibration(void);
-void stop_traction(void);
-void stop_break(void);
-void traction_up(void);
-void traction_down(void);
-void break_up(void);
-void break_down(void);
+void check_if_traction_hold(void);
+void check_traction_is_bottom(void);
+void check_traction_is_top(void);
+void check_brake_is_bottom(void);
+void check_brake_is_top(void);
+void check_if_brake_hold(void);
+
+void start_operation(void);
+void set_turn_barrel(uint16_t steps);
 
 /*******************************************************************/
 
 typedef enum
 {
     S_INIT,
+    S_STATUS,
     S_CAL,
     S_OPERATION,
 } E_STATE;
 
-E_STATE state = S_INIT;
+typedef enum
+{
+  S_EVAL_POT,  // read value and determine the position
+  S_GOTO_POS_A,
+  S_HOLD1_A,
+  S_RELEASE_B,  // if not already released
+  S_TURN_UP_A,
+  S_HOLD2_A,
+  S_GOTO_POS_B,
+  S_BRAKE_B,
+  S_RELEASE_A,
 
-int32_t pos_traction = 0, pos_break = 0, target_traction = 0, target_break = 0;
-int32_t end_traction = 0, end_break = 0;
-uint8_t dir_break = 'n', dir_traction = 'n';    // up, down, neutral
+  S_GOTO_DOWN_A,
+  S_HOLD3_A,
+  S_TURN_DOWN_A,
+  S_HOLD4_A,
+  S_GOTO_DOWN_B, // => S_BREAK_B
 
+} E_SUBSTATE;
+
+E_STATE state_A = S_INIT;
+E_STATE state_B = S_INIT;
+E_SUBSTATE state_op = S_GOTO_POS_A;
+
+int32_t pos_traction = 0, pos_brake = 0;
+int32_t target_traction = -1, target_brake = -1;
+int32_t end_traction = 0, end_brake = 0;
+uint8_t dir_brake = 'n', dir_traction = 'n';    // up, down, neutral
+uint8_t traction_is_top = 0;
+uint8_t break_is_top = 0;
+uint16_t work_position = 0;
+uint16_t target_position = 0;
+int adcValue=0;
 
 /*******************************************************************/
 
@@ -57,10 +113,13 @@ int main(void)
     ADC_Start();
     NVIC_Config();
 
-    // Timer 6 starten	
+    // Timer 6 starten  
     LL_TIM_EnableCounter(TIM6);
 
-    start_calibration();
+    state_B = S_CAL;
+    state_A = S_CAL;
+    check_if_traction_hold();
+//    check_traction_is_top();  // initiate status check for linear drive position
 
     while (1); 
 }
@@ -102,27 +161,24 @@ workmode:
 - 
 
 */
-/*******************************************************************/
-// we always wait for a response before sending the next command
-// therefore the while should never loop
-// and we can use this in interrupts.
-
-void sendCmd (uint8_t cmd)
-{
-    while (!LL_USART_IsActiveFlag_TXE(USART3)) {};
-    LL_USART_TransmitData8 (USART3,cmd);
-}
 
 /*******************************************************************/
 // called every 100 ms = 10 Hz
 // read out potentionmeter, smoothen, and derive directive
 
+#define ADC_MIN 280
+#define ADC_MAX 4075
 void TIM6_DAC_IRQHandler()
 {
-    int adcValue=0;
-
     adcValue = LL_ADC_REG_ReadConversionData12(ADC2);
-
+    // mapping from ADC_MIN .. ADC_MAX to 0 .. 11
+    target_position = (int)((float)(adcValue - ADC_MIN) / (ADC_MAX-ADC_MIN) * 12);
+    if (state_op == S_EVAL_POT && work_position < target_position)
+    {
+      work_position++;
+      state_op = S_GOTO_POS_A;
+      move_traction_to_pos();
+    }
     LL_TIM_ClearFlag_UPDATE(TIM6);
 }
 
@@ -137,113 +193,239 @@ void USART3_IRQHandler()
     recvd = LL_USART_ReceiveData8(USART3);
     switch (recvd)
     {
-        case 0x04: // barrel action finished
-        case 0x05: // barrel action ongoing
+        case 0x02:
+          check_if_brake_hold();
+        break;
+        case 0x03:
+        release_traction();
         break;
 
+        case 0x04: // barrel traction action finished
+        case 0x05: // barrel traction already in the state
+        
+        if(state_A == S_CAL)
+        {          
+          check_if_brake_hold();
+          return;
+        }
+        
+        switch (state_op)
+        {
+          case S_HOLD1_A:
+          state_op = S_RELEASE_B;
+          release_brake();
+          break;
+          
+          case S_TURN_UP_A:
+          state_op = S_HOLD2_A;
+          set_traction_to_hold();
+          break;
+          
+          case S_HOLD2_A:
+          state_op = S_GOTO_POS_B;
+          move_brake_to_pos();
+          break;
+          
+          case S_RELEASE_A:
+          if (work_position < target_position)
+          {
+            work_position++;
+            state_op = S_GOTO_POS_A;
+            move_traction_to_pos();
+          }
+          else
+          {
+            state_op = S_EVAL_POT;
+          }
+          break;
+          default: ;
+        }
+        break;
+
+          case 0x22:
+            check_traction_is_top();
+            break;
+          case 0x23:
+            release_brake();
+            break;
         case 0x24: // break action finished
-        case 0x25: // break action ongoing
+        case 0x25: // break action already in the state
+          
+        if(state_B == S_CAL)
+        {
+          check_traction_is_top();
+          return;
+        }
+        
+        switch (state_op)
+        {
+          case S_RELEASE_B:
+          state_op = S_TURN_UP_A;
+          set_turn_barrel(31);
+          break;
+          
+          case S_BRAKE_B:
+          state_op = S_RELEASE_A;
+          release_traction();
+          default: ;
+        }
         break;
 
         case 0x08: // status stopper A bottom not reached
         case 0x09: // status stopper A bottom active
         case 0x0a: // status stopper A top not reached
+        traction_is_top = 0;
+        move_traction_up();
+        check_brake_is_top();
+        break;
         case 0x0b: // status stopper A top active
+        traction_is_top = 1;
+        end_traction = pos_traction;
+        move_traction_down();
+        check_brake_is_top();
+        break;
         case 0x28: // status stopper B bottom not reached
         case 0x29: // status stopper B bottom active
         case 0x2a: // status stopper B top not reached
+        break_is_top = 0;
+        move_brake_up();
+        break;
         case 0x2b: // status stopper B top active
+        break_is_top = 1;
+        end_brake = pos_brake;
+        move_brake_down();
         break;
 
         case 0x0c: // stopper A bottom reached
         stop_traction();
-        if (state == S_CAL) {
+        if (state_A == S_CAL) {
             // position might be negative if the lin drive was not at the bottom
-            end_traction = end_traction - pos_traction;
-            state = S_OPERATION;
+            end_traction = -pos_traction;
+            pos_traction = 0;
+            state_A = S_OPERATION;
+            if (state_B == S_OPERATION) {
+                start_operation();
+            }
         }
         break;
         case 0x0d: // stopper A top reached
         stop_traction();
-        if (state == S_CAL) {
-            end_traction = pos_traction;
-            traction_down();
+        if (state_A == S_CAL) {
+            pos_traction = 0;
+            move_traction_down();
         }
         break;
 
         case 0x2c: // stopper B bottom reached
-        stop_break();
-        if (state == S_CAL) {
+        stop_brake();
+        if (state_B == S_CAL) {
             // position might be negative if the lin drive was not at the bottom
-            end_break = end_break - pos_break;
-            state = S_OPERATION;
+            end_brake = -pos_brake;
+            pos_brake = 0;
+            state_B = S_OPERATION;
+            if (state_A == S_OPERATION) {
+                start_operation();
+            }
         }
         break;
         case 0x2d: // stopper B top reached
-        stop_break();
-        if (state == S_CAL) {
-            end_break = pos_break;
-            break_down();
+        stop_brake();
+        if (state_B == S_CAL) {
+            pos_brake = 0;
+            move_brake_down();
         }
         break;
 
-        default:    // everything else should not come => safety reaction
-        stop_traction();
-        stop_break();
+        default: ;   // everything else should not come => safety reaction
+//        stop_traction();
+//        stop_brake();
         // reset nofretete and restart statemachine
     }
 }
 
 /*******************************************************************/
 
-// start the linear drive for A and B
-void start_calibration()
+#define CORR_TRANSACTION 1
+int32_t get_pos_traction (uint16_t role_pos)
 {
-    state = S_CAL;
-    traction_up();
-    break_up();
+  return (int32_t)((float)end_traction / 12.5 * role_pos + CORR_TRANSACTION);
 }
 
+#define CORR_brake 1.5
+int32_t get_pos_brake (uint16_t role_pos)
+{
+  return (int32_t)((float)end_brake / 12.5 * (role_pos + 0.5) + CORR_brake);
+}
+
+// both sides are calibrated and back at the bottom.
+void start_operation(void)
+{
+  state_op = S_GOTO_POS_A;
+  target_traction = get_pos_traction (work_position);
+  move_traction_up();
+}
+
+void move_brake_to_pos(void)
+{
+  target_brake = get_pos_brake (work_position);
+  move_brake_up();
+}
 // stop linear drive for A
 void stop_traction()
 {
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_5);
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_9);
+    if (state_op == S_GOTO_POS_A)
+    {
+        state_op = S_HOLD1_A;
+        set_traction_to_hold();
+    }
 }
 
 // stop linear drive for B
-void stop_break()
+void stop_brake()
 {
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_8);
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_6);
+    if (state_op == S_GOTO_POS_B)
+    {
+        state_op = S_BRAKE_B;
+        activate_brake();
+    }
 }
 
 // linear drive for A to go DOWN 
-void traction_down()
+void move_traction_down()
 {
     dir_traction = 'd';
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_9);
 }
 
 // linear drive for A to go UP 
-void traction_up()
+void move_traction_up()
 {
     dir_traction = 'u';
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_5);
 }
 
 // linear drive for B to go DOWN
-void break_down()
+void move_brake_down()
 {
-    dir_break = 'd';
+    dir_brake = 'd';
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_6);
 }
 
 // linear drive for B to go UP 
-void break_up()
+void move_brake_up()
 {
-    dir_break = 'u';
+    dir_brake = 'u';
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_8);
+}
+
+void move_traction_to_pos(void)
+{
+  target_traction = get_pos_traction(work_position);
+  move_traction_up();
 }
 
 /*******************************************************************/
@@ -257,16 +439,104 @@ void EXTI9_5_IRQHandler()
     {
         if (dir_traction == 'u') pos_traction++;
         else if (dir_traction == 'd') pos_traction--;
-        if (pos_traction == target_traction) stop_traction();
+        if (state_A != S_CAL && pos_traction == target_traction) stop_traction();
         LL_EXTI_ClearFlag_0_31 (LL_EXTI_LINE_6);
     }
     if(LL_EXTI_IsActiveFlag_0_31 (LL_EXTI_LINE_7))   // PC7 = Lochscheibe B
     {
-        if (dir_break == 'u') pos_break++;
-        else if (dir_break == 'd') pos_break--;
-        if (pos_break == target_break) stop_break();
+        if (dir_brake == 'u') pos_brake++;
+        else if (dir_brake == 'd') pos_brake--;
+        if (state_B != S_CAL && pos_brake == target_brake) stop_brake();
         LL_EXTI_ClearFlag_0_31 (LL_EXTI_LINE_7);
     }
 }
 
 // ========================================================================
+
+
+/* ==============   BOARD SPECIFIC CONFIGURATION CODE BEGIN    ============== */
+/**
+  * @brief  System Clock Configuration
+  *         The system Clock is configured as follow : 
+  *            System Clock source            = PLL (HSI)
+  *            SYSCLK(Hz)                     = 64000000
+  *            HCLK(Hz)                       = 64000000
+  *            AHB Prescaler                  = 1
+  *            APB1 Prescaler                 = 2
+  *            APB2 Prescaler                 = 1
+  *            PLLMUL                         = 16
+  *            Flash Latency(WS)              = 2
+  * @param  None
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  /* Set FLASH latency */ 
+  LL_FLASH_SetLatency(LL_FLASH_LATENCY_2);
+
+  /* Enable HSI if not already activated*/
+  if (LL_RCC_HSI_IsReady() == 0)
+  {
+    /* Enable HSI and wait for activation*/
+    LL_RCC_HSI_Enable(); 
+    while(LL_RCC_HSI_IsReady() != 1)
+    {
+    };
+  }
+
+  /* Main PLL configuration and activation */
+  LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSI_DIV_2, LL_RCC_PLL_MUL_16);
+  
+  LL_RCC_PLL_Enable();
+  while(LL_RCC_PLL_IsReady() != 1) 
+  {
+  };
+  
+  /* Sysclk activation on the main PLL */
+  LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+  LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
+  while(LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
+  {
+  };
+  
+  /* Set APB1 & APB2 prescaler*/
+  LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_2);
+  LL_RCC_SetAPB2Prescaler(LL_RCC_APB2_DIV_1);
+  
+  /* Set systick to 1ms in using frequency set to 64MHz */
+  /* This frequency can be calculated through LL RCC macro */
+  /* ex: __LL_RCC_CALC_PLLCLK_FREQ ((HSI_VALUE / 2), LL_RCC_PLL_MUL_16) */
+  LL_Init1msTick(64000000);
+  
+  /* Update CMSIS variable (which can be updated also through SystemCoreClockUpdate function) */
+  LL_SetSystemCoreClock(64000000);
+}
+/* ==============   BOARD SPECIFIC CONFIGURATION CODE END      ============== */
+
+#ifdef  USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d", file, line) */
+
+  /* Infinite loop */
+  while (1)
+  {
+  }
+}
+#endif
+
+/**
+  * @}
+  */
+
+/**
+  * @}
+  */

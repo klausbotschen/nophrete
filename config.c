@@ -171,6 +171,7 @@ void ADC_Config(void)
     // create channel sequence list with PA7 = ADC2_IN4 = channel 4 at rank 1
     LL_ADC_REG_SetSequencerRanks(ADC2, LL_ADC_REG_RANK_1, LL_ADC_CHANNEL_4);
     
+    LL_ADC_SetResolution(ADC2, LL_ADC_RESOLUTION_12B);
     // configure arbitrary sample time, not so relevant for potentiometer
     LL_ADC_SetChannelSamplingTime(ADC2, LL_ADC_CHANNEL_4, LL_ADC_SAMPLINGTIME_61CYCLES_5);
 }
@@ -205,63 +206,3 @@ void ADC_Start(void)
     // and start regular conversion
     LL_ADC_REG_StartConversion(ADC2);
 }
-
-/************************ (C) COPYRIGHT STMicroelectronics *********/
-/* ==============   BOARD SPECIFIC CONFIGURATION CODE BEGIN    ============== */
-/**
-  * @brief  System Clock Configuration
-  *         The system Clock is configured as follow : 
-  *            System Clock source            = PLL (HSI)
-  *            SYSCLK(Hz)                     = 64000000
-  *            HCLK(Hz)                       = 64000000
-  *            AHB Prescaler                  = 1
-  *            APB1 Prescaler                 = 2
-  *            APB2 Prescaler                 = 1
-  *            PLLMUL                         = 16
-  *            Flash Latency(WS)              = 2
-  * @param  None
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
-  /* Set FLASH latency */ 
-  LL_FLASH_SetLatency(LL_FLASH_LATENCY_2);
-
-  /* Enable HSI if not already activated*/
-  if (LL_RCC_HSI_IsReady() == 0)
-  {
-    /* Enable HSI and wait for activation*/
-    LL_RCC_HSI_Enable(); 
-    while(LL_RCC_HSI_IsReady() != 1)
-    {
-    };
-  }
-
-  /* Main PLL configuration and activation */
-  LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSI_DIV_2, LL_RCC_PLL_MUL_16);
-  
-  LL_RCC_PLL_Enable();
-  while(LL_RCC_PLL_IsReady() != 1) 
-  {
-  };
-  
-  /* Sysclk activation on the main PLL */
-  LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
-  LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
-  while(LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
-  {
-  };
-  
-  /* Set APB1 & APB2 prescaler*/
-  LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_2);
-  LL_RCC_SetAPB2Prescaler(LL_RCC_APB2_DIV_1);
-  
-  /* Set systick to 1ms in using frequency set to 64MHz */
-  /* This frequency can be calculated through LL RCC macro */
-  /* ex: __LL_RCC_CALC_PLLCLK_FREQ ((HSI_VALUE / 2), LL_RCC_PLL_MUL_16) */
-  LL_Init1msTick(64000000);
-  
-  /* Update CMSIS variable (which can be updated also through SystemCoreClockUpdate function) */
-  LL_SetSystemCoreClock(64000000);
-}
-/* ==============   BOARD SPECIFIC CONFIGURATION CODE END      ============== */
