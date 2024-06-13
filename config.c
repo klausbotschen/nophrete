@@ -171,7 +171,7 @@ void ADC_Config(void)
     // create channel sequence list with PA7 = ADC2_IN4 = channel 4 at rank 1
     LL_ADC_REG_SetSequencerRanks(ADC2, LL_ADC_REG_RANK_1, LL_ADC_CHANNEL_4);
     
-    LL_ADC_SetResolution(ADC2, LL_ADC_RESOLUTION_12B);
+		LL_ADC_SetResolution(ADC2, LL_ADC_RESOLUTION_12B);
     // configure arbitrary sample time, not so relevant for potentiometer
     LL_ADC_SetChannelSamplingTime(ADC2, LL_ADC_CHANNEL_4, LL_ADC_SAMPLINGTIME_61CYCLES_5);
 }

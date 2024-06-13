@@ -6,9 +6,10 @@
 // therefore the while should never loop
 // and we can use this in interrupts.
 
+
+
 void send_cmd (uint8_t cmd)
-{
-    while (!LL_USART_IsActiveFlag_TXE(USART3)) {};
+{  
     LL_USART_TransmitData8 (USART3,cmd);
 }
 
@@ -49,9 +50,17 @@ void release_traction(void)
 		send_cmd(0x00);
 }
 
-void set_turn_barrel(uint16_t steps)
+void set_turn_barrel(uint16_t steps, DIRECTION direction)
 {
-	send_cmd(0x41+steps);
+	if(direction == UP)
+	{
+		send_cmd(0x40+steps);
+	}
+	else
+	{
+		send_cmd(0x00+steps);
+	}
+	
 }
 
 void release_brake(void)

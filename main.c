@@ -1,9 +1,9 @@
 /*
   ******************************************************************************
   HIER BITTE NAMEN + MATRIKELNUMMER EINTRAGEN
-  
-  In diesem Projekt gilt:
-  *=============================================================================
+	
+	In diesem Projekt gilt:
+	*=============================================================================
   *        SYSCLK(Hz)                             | 64000000
   *-----------------------------------------------------------------------------
   *        AHB Prescaler                          | 1
@@ -54,35 +54,39 @@ void check_brake_is_top(void);
 void check_if_brake_hold(void);
 
 void start_operation(void);
-void set_turn_barrel(uint16_t steps);
+
 
 /*******************************************************************/
 
 typedef enum
 {
     S_INIT,
-    S_STATUS,
+		S_STATUS,
     S_CAL,
     S_OPERATION,
 } E_STATE;
 
+// expected state: A is free to move, B is either engaged or free
 typedef enum
 {
-  S_EVAL_POT,  // read value and determine the position
-  S_GOTO_POS_A,
-  S_HOLD1_A,
-  S_RELEASE_B,  // if not already released
-  S_TURN_UP_A,
-  S_HOLD2_A,
-  S_GOTO_POS_B,
-  S_BRAKE_B,
-  S_RELEASE_A,
+	S_EVAL_POT,	// read value and determine the position
+	S_GOTO_POS_A,
+	S_HOLD1_A,
+	S_RELEASE_B,	// if not already released
+	S_TURN_UP_A,
+	S_HOLD2_A,
+	S_GOTO_POS_B,
+	S_BRAKE_B,
+	S_RELEASE_A, // => from here to S_EVLA_POT or loop to S_GOTO_POS_A
 
-  S_GOTO_DOWN_A,
-  S_HOLD3_A,
-  S_TURN_DOWN_A,
-  S_HOLD4_A,
-  S_GOTO_DOWN_B, // => S_BREAK_B
+	S_HOLD3_A,
+	S_RELEASE2_B,
+	S_GOTO_DOWN_B,
+	S_TURN_DOWN_A,
+	S_HOLD4_A,
+	S_BRAKE2_B,
+	S_RELEASE2_A,
+	S_GOTO_POS2_A, // => from here to S_EVLA_POT or loop to S_GOTO_POS_A
 
 } E_SUBSTATE;
 
@@ -113,13 +117,12 @@ int main(void)
     ADC_Start();
     NVIC_Config();
 
-    // Timer 6 starten  
+    // Timer 6 starten	
     LL_TIM_EnableCounter(TIM6);
 
     state_B = S_CAL;
     state_A = S_CAL;
-    check_if_traction_hold();
-//    check_traction_is_top();  // initiate status check for linear drive position
+		check_if_traction_hold();
 
     while (1); 
 }
@@ -171,14 +174,25 @@ workmode:
 void TIM6_DAC_IRQHandler()
 {
     adcValue = LL_ADC_REG_ReadConversionData12(ADC2);
-    // mapping from ADC_MIN .. ADC_MAX to 0 .. 11
-    target_position = (int)((float)(adcValue - ADC_MIN) / (ADC_MAX-ADC_MIN) * 12);
-    if (state_op == S_EVAL_POT && work_position < target_position)
-    {
-      work_position++;
-      state_op = S_GOTO_POS_A;
-      move_traction_to_pos();
-    }
+		// mapping from ADC_MIN .. ADC_MAX to 0 .. 11
+		if (state_op == S_EVAL_POT)
+		{
+			target_position = (int)((float)(adcValue - ADC_MIN) / (ADC_MAX-ADC_MIN) * 13);
+			if  (work_position < target_position)
+			{
+				state_op = S_GOTO_POS_A;
+				move_traction_to_pos();
+			}
+			else
+			{
+				if (work_position > target_position)
+				{
+					work_position--;
+					state_op = S_HOLD3_A;
+					set_traction_to_hold();
+				}
+			}
+		}
     LL_TIM_ClearFlag_UPDATE(TIM6);
 }
 
@@ -193,107 +207,135 @@ void USART3_IRQHandler()
     recvd = LL_USART_ReceiveData8(USART3);
     switch (recvd)
     {
-        case 0x02:
-          check_if_brake_hold();
-        break;
-        case 0x03:
-        release_traction();
-        break;
+				case 0x02:
+					check_if_brake_hold();
+				break;
+				case 0x03:
+				release_traction();
+				break;
 
         case 0x04: // barrel traction action finished
         case 0x05: // barrel traction already in the state
-        
-        if(state_A == S_CAL)
-        {          
-          check_if_brake_hold();
-          return;
-        }
-        
-        switch (state_op)
-        {
-          case S_HOLD1_A:
-          state_op = S_RELEASE_B;
-          release_brake();
-          break;
-          
-          case S_TURN_UP_A:
-          state_op = S_HOLD2_A;
-          set_traction_to_hold();
-          break;
-          
-          case S_HOLD2_A:
-          state_op = S_GOTO_POS_B;
-          move_brake_to_pos();
-          break;
-          
-          case S_RELEASE_A:
-          if (work_position < target_position)
-          {
-            work_position++;
-            state_op = S_GOTO_POS_A;
-            move_traction_to_pos();
-          }
-          else
-          {
-            state_op = S_EVAL_POT;
-          }
-          break;
-          default: ;
-        }
+				
+				if(state_A == S_CAL)
+				{					
+					check_if_brake_hold();
+					return;
+				}
+				
+				switch (state_op)
+				{
+					case S_HOLD1_A:
+					state_op = S_RELEASE_B;
+					release_brake();
+					break;
+					
+					case S_TURN_UP_A:
+					state_op = S_HOLD2_A;
+					set_traction_to_hold();
+					break;
+					
+					case S_HOLD2_A:
+					state_op = S_GOTO_POS_B;
+					move_brake_to_pos();
+					break;
+					
+					case S_RELEASE_A:
+					state_op = S_EVAL_POT;
+					work_position++;
+					break;
+					
+					case S_HOLD3_A:
+					state_op = S_RELEASE2_B;
+					release_brake();
+					break;
+					case S_TURN_DOWN_A:
+						state_op= S_HOLD4_A;
+						set_traction_to_hold();
+						break;
+					case S_HOLD4_A:
+						state_op = S_BRAKE2_B;
+						activate_brake();
+						break;
+					
+					case S_RELEASE2_A:
+					state_op = S_GOTO_POS2_A;
+					move_traction_to_pos();
+					break;
+					
+					default: ;
+				}
         break;
 
-          case 0x22:
-            check_traction_is_top();
-            break;
-          case 0x23:
-            release_brake();
-            break;
-        case 0x24: // break action finished
+					case 0x22:
+						check_traction_is_top();
+						break;
+					case 0x23:
+						release_brake();
+						break;
+
+				case 0x24: // break action finished
         case 0x25: // break action already in the state
-          
-        if(state_B == S_CAL)
-        {
-          check_traction_is_top();
-          return;
-        }
-        
-        switch (state_op)
-        {
-          case S_RELEASE_B:
-          state_op = S_TURN_UP_A;
-          set_turn_barrel(31);
-          break;
-          
-          case S_BRAKE_B:
-          state_op = S_RELEASE_A;
-          release_traction();
-          default: ;
-        }
+				if(state_B == S_CAL)
+				{
+					check_traction_is_top();
+					return;
+				}
+				
+				switch (state_op)
+				{
+					case S_RELEASE_B:
+					state_op = S_TURN_UP_A;
+					set_turn_barrel(31, UP);
+					break;
+					
+					case S_BRAKE_B:
+					state_op = S_RELEASE_A;
+					release_traction();
+					break;
+					
+					case S_RELEASE2_B:
+					state_op = S_GOTO_DOWN_B;
+					move_brake_to_pos();
+					break;
+					
+					case S_GOTO_DOWN_B:
+						state_op = S_BRAKE_B;
+						activate_brake();
+						break;
+
+					case S_BRAKE2_B:
+					state_op = S_RELEASE2_A;
+					release_traction();
+					break;
+
+					default: ;
+				}
         break;
 
         case 0x08: // status stopper A bottom not reached
         case 0x09: // status stopper A bottom active
         case 0x0a: // status stopper A top not reached
-        traction_is_top = 0;
-        move_traction_up();
-        check_brake_is_top();
-        break;
+				traction_is_top = 0;
+				move_traction_up();
+				check_brake_is_top();
+				break;
         case 0x0b: // status stopper A top active
-        traction_is_top = 1;
-        end_traction = pos_traction;
-        move_traction_down();
-        check_brake_is_top();
-        break;
+				traction_is_top = 1;
+				end_traction = pos_traction;
+				move_traction_down();
+				check_brake_is_top();
+				break;
         case 0x28: // status stopper B bottom not reached
         case 0x29: // status stopper B bottom active
         case 0x2a: // status stopper B top not reached
-        break_is_top = 0;
-        move_brake_up();
-        break;
+				break_is_top = 0;
+				move_brake_up();
+				break;
         case 0x2b: // status stopper B top active
-        break_is_top = 1;
-        end_brake = pos_brake;
-        move_brake_down();
+				break_is_top = 1;
+				end_brake = pos_brake;
+				move_brake_down();
         break;
 
         case 0x0c: // stopper A bottom reached
@@ -301,11 +343,11 @@ void USART3_IRQHandler()
         if (state_A == S_CAL) {
             // position might be negative if the lin drive was not at the bottom
             end_traction = -pos_traction;
-            pos_traction = 0;
+						pos_traction = 0;
             state_A = S_OPERATION;
-            if (state_B == S_OPERATION) {
-                start_operation();
-            }
+						if (state_B == S_OPERATION) {
+								start_operation();
+						}
         }
         break;
         case 0x0d: // stopper A top reached
@@ -321,11 +363,11 @@ void USART3_IRQHandler()
         if (state_B == S_CAL) {
             // position might be negative if the lin drive was not at the bottom
             end_brake = -pos_brake;
-            pos_brake = 0;
+						pos_brake = 0;
             state_B = S_OPERATION;
-            if (state_A == S_OPERATION) {
-                start_operation();
-            }
+						if (state_A == S_OPERATION) {
+								start_operation();
+						}
         }
         break;
         case 0x2d: // stopper B top reached
@@ -348,38 +390,40 @@ void USART3_IRQHandler()
 #define CORR_TRANSACTION 1
 int32_t get_pos_traction (uint16_t role_pos)
 {
-  return (int32_t)((float)end_traction / 12.5 * role_pos + CORR_TRANSACTION);
+	return (int32_t)((float)end_traction / 12.5 * role_pos + CORR_TRANSACTION);
 }
 
 #define CORR_brake 1.5
 int32_t get_pos_brake (uint16_t role_pos)
 {
-  return (int32_t)((float)end_brake / 12.5 * (role_pos + 0.5) + CORR_brake);
+	return (int32_t)((float)end_brake / 12.5 * (role_pos + 0.5) + CORR_brake);
 }
 
 // both sides are calibrated and back at the bottom.
 void start_operation(void)
 {
-  state_op = S_GOTO_POS_A;
-  target_traction = get_pos_traction (work_position);
-  move_traction_up();
-}
-
-void move_brake_to_pos(void)
-{
-  target_brake = get_pos_brake (work_position);
-  move_brake_up();
+	state_op = S_GOTO_POS_A;
+	target_traction = get_pos_traction (work_position);
+	if (work_position == target_position) state_op = S_EVAL_POT;
+  else move_traction_to_pos();
 }
 // stop linear drive for A
 void stop_traction()
 {
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_5);
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_9);
-    if (state_op == S_GOTO_POS_A)
-    {
-        state_op = S_HOLD1_A;
-        set_traction_to_hold();
-    }
+		if (state_op == S_GOTO_POS_A)
+		{
+				state_op = S_HOLD1_A;
+				set_traction_to_hold();
+		}
+		else
+		{
+				if(state_op == S_GOTO_POS2_A)
+				{
+					state_op = S_EVAL_POT;
+				}
+		}
 }
 
 // stop linear drive for B
@@ -387,11 +431,19 @@ void stop_brake()
 {
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_8);
     LL_GPIO_ResetOutputPin (GPIOA,LL_GPIO_PIN_6);
-    if (state_op == S_GOTO_POS_B)
-    {
-        state_op = S_BRAKE_B;
-        activate_brake();
-    }
+		switch (state_op)
+		{
+			case S_GOTO_POS_B:
+			state_op = S_BRAKE_B;
+			activate_brake();
+			break;
+			case S_GOTO_DOWN_B:
+			state_op = S_TURN_DOWN_A;
+			set_turn_barrel (20, DOWN);
+			break;
+
+			default: ;
+		}
 }
 
 // linear drive for A to go DOWN 
@@ -422,10 +474,33 @@ void move_brake_up()
     LL_GPIO_SetOutputPin (GPIOA,LL_GPIO_PIN_8);
 }
 
+
+void move_brake_to_pos(void)
+{
+	if (state_op == S_GOTO_DOWN_B && work_position > 0)
+		target_brake = get_pos_brake (work_position-1);
+	else
+		target_brake = get_pos_brake (work_position);
+	if (target_brake > pos_brake)
+		move_brake_up();
+	else if (target_brake < pos_brake)
+		move_brake_down();
+	else
+		stop_brake();
+}
+
 void move_traction_to_pos(void)
 {
-  target_traction = get_pos_traction(work_position);
-  move_traction_up();
+	if (state_op == S_GOTO_POS2_A && work_position > 0)
+		target_traction = get_pos_traction (work_position-1);
+	else
+		target_traction = get_pos_traction (work_position);
+	if (target_traction > pos_traction)
+		move_traction_up();
+	else if (target_traction < pos_traction)
+		move_traction_down();
+	else
+		stop_traction();
 }
 
 /*******************************************************************/

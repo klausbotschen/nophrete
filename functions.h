@@ -1,5 +1,10 @@
 #include <stdint.h>
 
+typedef enum
+{
+	UP,
+	DOWN
+} DIRECTION;
 
 void send_cmd (uint8_t cmd);
 void stop_traction(void);
@@ -15,3 +20,4 @@ void set_traction_to_hold(void);
 void release_traction(void);
 void move_brake_to_pos(void);
 void move_traction_to_pos(void);
+void set_turn_barrel(uint16_t steps, DIRECTION direction);
